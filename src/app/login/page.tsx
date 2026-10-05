@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
+import { cloudSetupProblems } from "@/server/deployment";
+import { CloudSetupHelp } from "@/components/cloud-setup-help";
 import { isAuthenticated, isSetUp } from "@/server/auth";
 import { AuthShell } from "@/components/auth-shell";
 import { LoginForm } from "./login-form";
@@ -8,6 +10,7 @@ export const metadata = { title: "Anmelden" };
 
 export default async function LoginPage() {
   await connection();
+  if (cloudSetupProblems().length) return <CloudSetupHelp />;
   if (!(await isSetUp())) redirect("/einrichten");
   if (await isAuthenticated()) redirect("/");
   return (

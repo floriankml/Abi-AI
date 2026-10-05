@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { Settings } from "lucide-react";
 import { requireAuth } from "@/server/auth";
+import { cloudSetupProblems } from "@/server/deployment";
+import { CloudSetupHelp } from "@/components/cloud-setup-help";
 import { MobileNav, Sidebar } from "@/components/nav";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
+  if (cloudSetupProblems().length) return <CloudSetupHelp />;
   // Macht alle Seiten dynamisch und schützt sie.
   await requireAuth();
   return (
