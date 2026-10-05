@@ -1,14 +1,11 @@
-import fs from "node:fs";
-import path from "node:path";
 import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
-import { getDb } from "../db/client";
+import { getDb, queryAll } from "../db/client";
 import { env } from "../env";
 import { materialChunks, materials, type MaterialCategory } from "../db/schema";
 import { chunkPages } from "../ingest/chunk";
 import { detectKind, extractText, type MaterialKind } from "../ingest/extract";
-
-const filesDir = () => path.join(env.dataDir, "files");
+import { deleteFile, readFile, saveFile } from "../storage";
 
 const EXT_BY_KIND: Record<MaterialKind, string> = {
   pdf: "pdf",
@@ -24,6 +21,8 @@ export class MaterialError extends Error {}
 /**
  * Speichert eine Datei unverändert (Name = SHA-256), extrahiert Text und
  * legt Abschnitte für die Volltextsuche an.
+ *
+ * `storedAt`: Datei liegt bereits im Speicher (Direkt-Upload in die Cloud).
  */
 export async function addMaterial(input: {
   data: Buffer;
@@ -34,6 +33,7 @@ export async function addMaterial(input: {
   category: MaterialCategory;
   title: string;
   kind?: MaterialKind;
+  storedAt?: string;
 }) {
   if (input.data.length > env.maxUploadMb * 1024 * 1024) {
     throw new MaterialError(`Datei ist größer als ${env.maxUploadMb} MB.`);
@@ -46,17 +46,15 @@ export async function addMaterial(input: {
   const sha256 = createHash("sha256").update(input.data).digest("hex");
   const origExt = input.originalName.toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1];
   const ext = EXT_BY_KIND[kind] || origExt || "bin";
-  const relPath = `${sha256}.${ext}`;
-  fs.mkdirSync(filesDir(), { recursive: true });
-  const abs = path.join(filesDir(), relPath);
-  if (!fs.existsSync(abs)) fs.writeFileSync(abs, input.data);
+  const mime = input.mime || "application/octet-stream";
+  const filePath = input.storedAt ?? (await saveFile(`${sha256}.${ext}`, input.data, mime));
 
   const extracted = await extractText(kind, input.data);
   const chunks = extracted.status === "ok" ? chunkPages(extracted.pages) : [];
 
-  const db = getDb();
-  return db.transaction((tx) => {
-    const material = tx
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    const material = await tx
       .insert(materials)
       .values({
         subjectId: input.subjectId,
@@ -65,8 +63,8 @@ export async function addMaterial(input: {
         kind,
         category: input.category,
         originalName: input.originalName,
-        filePath: relPath,
-        mime: input.mime || "application/octet-stream",
+        filePath,
+        mime,
         size: input.data.length,
         sha256,
         extractionStatus: extracted.status,
@@ -74,12 +72,11 @@ export async function addMaterial(input: {
       })
       .returning()
       .get();
-    chunks.forEach((c, i) =>
-      tx
-        .insert(materialChunks)
-        .values({ materialId: material.id, position: i, page: c.page, text: c.text })
-        .run(),
-    );
+    if (chunks.length) {
+      await tx.insert(materialChunks).values(
+        chunks.map((c, i) => ({ materialId: material.id, position: i, page: c.page, text: c.text })),
+      );
+    }
     return { material, chunkCount: chunks.length };
   });
 }
@@ -105,36 +102,34 @@ export function addNote(input: {
   });
 }
 
-export function listMaterials(filter: { subjectId?: string } = {}) {
-  const db = getDb();
+export async function listMaterials(filter: { subjectId?: string } = {}) {
+  const db = await getDb();
   const q = db.select().from(materials).orderBy(desc(materials.createdAt));
-  return filter.subjectId ? q.where(eq(materials.subjectId, filter.subjectId)).all() : q.all();
+  return filter.subjectId ? q.where(eq(materials.subjectId, filter.subjectId)) : q;
 }
 
-export function getMaterial(id: string) {
-  return getDb().select().from(materials).where(eq(materials.id, id)).get();
+export async function getMaterial(id: string) {
+  const db = await getDb();
+  return db.select().from(materials).where(eq(materials.id, id)).get();
 }
 
-export function materialFilePath(relPath: string): string {
-  const abs = path.resolve(filesDir(), relPath);
-  // Schutz vor Pfad-Tricks: nur innerhalb des Dateiordners.
-  if (!abs.startsWith(path.resolve(filesDir()) + path.sep)) throw new Error("Ungültiger Pfad");
-  return abs;
+export function readMaterialFile(filePath: string) {
+  return readFile(filePath);
 }
 
-export function deleteMaterial(id: string) {
-  const db = getDb();
-  const m = getMaterial(id);
+export async function deleteMaterial(id: string) {
+  const db = await getDb();
+  const m = await getMaterial(id);
   if (!m) return;
-  db.delete(materials).where(eq(materials.id, id)).run();
+  await db.delete(materials).where(eq(materials.id, id));
   // Datei nur löschen, wenn kein anderes Material dieselbe Datei nutzt.
-  const stillUsed = db.select().from(materials).where(eq(materials.sha256, m.sha256)).get();
-  if (!stillUsed) fs.rmSync(materialFilePath(m.filePath), { force: true });
+  const stillUsed = await db.select().from(materials).where(eq(materials.filePath, m.filePath)).get();
+  if (!stillUsed) await deleteFile(m.filePath);
 }
 
-export function chunkCounts(): Map<string, number> {
-  const rows = getDb()
-    .$client.prepare("SELECT material_id AS id, COUNT(*) AS n FROM material_chunks GROUP BY material_id")
-    .all() as { id: string; n: number }[];
-  return new Map(rows.map((r) => [r.id, r.n]));
+export async function chunkCounts(): Promise<Map<string, number>> {
+  const rows = await queryAll<{ id: string; n: number }>(
+    "SELECT material_id AS id, COUNT(*) AS n FROM material_chunks GROUP BY material_id",
+  );
+  return new Map(rows.map((r) => [r.id, Number(r.n)]));
 }

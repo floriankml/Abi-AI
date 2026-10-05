@@ -3,31 +3,38 @@ import { getDb } from "../db/client";
 import { slugify } from "../db/seed";
 import { subjects, topics, type SubjectProfile, type Topic } from "../db/schema";
 
-export function listSubjects() {
-  return getDb()
+export async function listSubjects() {
+  const db = await getDb();
+  return db
     .select()
     .from(subjects)
     .where(isNull(subjects.archivedAt))
-    .orderBy(asc(subjects.position), asc(subjects.name))
-    .all();
+    .orderBy(asc(subjects.position), asc(subjects.name));
 }
 
-export function getSubject(id: string) {
-  return getDb().select().from(subjects).where(eq(subjects.id, id)).get();
+/** Alle Fächer inkl. archivierter (für Anzeigen alter Daten). */
+export async function allSubjectsById() {
+  const db = await getDb();
+  return new Map((await db.select().from(subjects)).map((s) => [s.id, s]));
 }
 
-export function createSubject(input: {
+export async function getSubject(id: string) {
+  const db = await getDb();
+  return db.select().from(subjects).where(eq(subjects.id, id)).get();
+}
+
+export async function createSubject(input: {
   name: string;
   profile: SubjectProfile;
   level: "eA" | "gA" | null;
   color: string;
 }) {
-  const db = getDb();
+  const db = await getDb();
   let slug = slugify(input.name) || "fach";
-  if (db.select().from(subjects).where(eq(subjects.slug, slug)).get()) {
+  if (await db.select().from(subjects).where(eq(subjects.slug, slug)).get()) {
     slug = `${slug}-${crypto.randomUUID().slice(0, 4)}`;
   }
-  const position = db.select().from(subjects).all().length;
+  const position = (await db.select({ id: subjects.id }).from(subjects)).length;
   return db
     .insert(subjects)
     .values({ ...input, slug, position })
@@ -35,29 +42,33 @@ export function createSubject(input: {
     .get();
 }
 
-export function updateSubject(
+export async function updateSubject(
   id: string,
   input: { name: string; profile: SubjectProfile; level: "eA" | "gA" | null; color: string },
 ) {
-  getDb().update(subjects).set(input).where(eq(subjects.id, id)).run();
+  const db = await getDb();
+  await db.update(subjects).set(input).where(eq(subjects.id, id));
 }
 
 /** Archivieren statt löschen: Lernhistorie bleibt erhalten. */
-export function archiveSubject(id: string) {
-  getDb()
-    .update(subjects)
-    .set({ archivedAt: new Date().toISOString() })
-    .where(eq(subjects.id, id))
-    .run();
+export async function archiveSubject(id: string) {
+  const db = await getDb();
+  await db.update(subjects).set({ archivedAt: new Date().toISOString() }).where(eq(subjects.id, id));
 }
 
-export function listTopics(subjectId: string): Topic[] {
-  return getDb()
+export async function listTopics(subjectId: string): Promise<Topic[]> {
+  const db = await getDb();
+  return db
     .select()
     .from(topics)
     .where(eq(topics.subjectId, subjectId))
-    .orderBy(asc(topics.position), asc(topics.title))
-    .all();
+    .orderBy(asc(topics.position), asc(topics.title));
+}
+
+/** Alle Themen aller Fächer – eine Abfrage statt vieler (wichtig bei Cloud-Datenbank). */
+export async function listAllTopics(): Promise<Topic[]> {
+  const db = await getDb();
+  return db.select().from(topics).orderBy(asc(topics.position), asc(topics.title));
 }
 
 export type TopicNode = Topic & { children: TopicNode[]; depth: number };
@@ -79,47 +90,54 @@ export function flattenTree(nodes: TopicNode[]): TopicNode[] {
   return nodes.flatMap((n) => [n, ...flattenTree(n.children)]);
 }
 
-/** Pfad vom Wurzelthema bis zum Thema, z. B. ["Analytische Geometrie", "Geraden"]. */
-export function topicPath(topicId: string | null): string[] {
+/** Pfad aus einer bereits geladenen Themenliste (ohne Datenbankzugriff). */
+export function topicPathFrom(list: Topic[], topicId: string | null): string[] {
   if (!topicId) return [];
-  const db = getDb();
+  const byId = new Map(list.map((t) => [t.id, t]));
   const path: string[] = [];
-  let current = db.select().from(topics).where(eq(topics.id, topicId)).get();
+  let current = byId.get(topicId);
   while (current && path.length < 20) {
     path.unshift(current.title);
-    current = current.parentId
-      ? db.select().from(topics).where(eq(topics.id, current.parentId)).get()
-      : undefined;
+    current = current.parentId ? byId.get(current.parentId) : undefined;
   }
   return path;
 }
 
-/** Das Thema und alle Unterthemen. */
-export function topicSubtreeIds(subjectId: string, topicId: string): string[] {
-  const all = listTopics(subjectId);
+/** Pfad vom Wurzelthema bis zum Thema, z. B. ["Analytische Geometrie", "Geraden"]. */
+export async function topicPath(topicId: string | null): Promise<string[]> {
+  if (!topicId) return [];
+  return topicPathFrom(await listAllTopics(), topicId);
+}
+
+/** Das Thema und alle Unterthemen (aus geladener Liste). */
+export function subtreeIdsFrom(list: Topic[], topicId: string): string[] {
   const ids = [topicId];
   for (let i = 0; i < ids.length; i++) {
-    for (const t of all) if (t.parentId === ids[i]) ids.push(t.id);
+    for (const t of list) if (t.parentId === ids[i]) ids.push(t.id);
   }
   return ids;
 }
 
-export function createTopic(input: {
+export async function topicSubtreeIds(subjectId: string, topicId: string): Promise<string[]> {
+  return subtreeIdsFrom(await listTopics(subjectId), topicId);
+}
+
+export async function createTopic(input: {
   subjectId: string;
   parentId: string | null;
   title: string;
   examWeight: number;
 }) {
-  const db = getDb();
+  const db = await getDb();
   if (input.parentId) {
-    const parent = db
+    const parent = await db
       .select()
       .from(topics)
       .where(and(eq(topics.id, input.parentId), eq(topics.subjectId, input.subjectId)))
       .get();
     if (!parent) throw new Error("Oberthema nicht gefunden");
   }
-  const siblings = listTopics(input.subjectId).filter(
+  const siblings = (await listTopics(input.subjectId)).filter(
     (t) => (t.parentId ?? null) === input.parentId,
   );
   return db
@@ -129,10 +147,12 @@ export function createTopic(input: {
     .get();
 }
 
-export function updateTopic(id: string, input: { title: string; examWeight: number }) {
-  getDb().update(topics).set(input).where(eq(topics.id, id)).run();
+export async function updateTopic(id: string, input: { title: string; examWeight: number }) {
+  const db = await getDb();
+  await db.update(topics).set(input).where(eq(topics.id, id));
 }
 
-export function deleteTopic(id: string) {
-  getDb().delete(topics).where(eq(topics.id, id)).run();
+export async function deleteTopic(id: string) {
+  const db = await getDb();
+  await db.delete(topics).where(eq(topics.id, id));
 }

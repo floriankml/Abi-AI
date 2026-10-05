@@ -3,7 +3,7 @@ import { Download, Trash2 } from "lucide-react";
 import { addNoteAction, deleteMaterialAction } from "@/app/actions";
 import { chunkCounts, listMaterials } from "@/server/services/materials";
 import { subjectOptions } from "@/server/services/options";
-import { listSubjects, topicPath } from "@/server/services/subjects";
+import { allSubjectsById, listAllTopics, listSubjects, topicPathFrom } from "@/server/services/subjects";
 import { ActionForm, ConfirmButton } from "@/components/action-form";
 import { SubjectTopicSelect } from "@/components/subject-topic-select";
 import { Badge, Card, CardTitle, EmptyState, Field, PageHeader, SubjectDot, buttonClass, cx, inputClass } from "@/components/ui";
@@ -25,11 +25,14 @@ export default async function MaterialsPage({ searchParams }: PageProps<"/materi
   await requireAuth();
   const sp = await searchParams;
   const subjectFilter = typeof sp.subject === "string" ? sp.subject : undefined;
-  const subjects = listSubjects();
-  const options = subjectOptions();
-  const materials = listMaterials({ subjectId: subjectFilter });
-  const chunks = chunkCounts();
-  const bySubject = new Map(subjects.map((s) => [s.id, s]));
+  const [subjects, options, materials, chunks, bySubject, allTopics] = await Promise.all([
+    listSubjects(),
+    subjectOptions(),
+    listMaterials({ subjectId: subjectFilter }),
+    chunkCounts(),
+    allSubjectsById(),
+    listAllTopics(),
+  ]);
 
   return (
     <>
@@ -81,7 +84,7 @@ export default async function MaterialsPage({ searchParams }: PageProps<"/materi
             {materials.map((m) => {
               const s = bySubject.get(m.subjectId);
               const status = STATUS[m.extractionStatus];
-              const path = topicPath(m.topicId);
+              const path = topicPathFrom(allTopics, m.topicId);
               return (
                 <li key={m.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
                   <SubjectDot color={s?.color ?? "#999"} />

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       category: form.get("category"),
       title: form.get("title") ?? undefined,
     });
-  if (!meta.success || !getSubject(meta.data.subjectId)) {
+  if (!meta.success || !(await getSubject(meta.data.subjectId))) {
     return NextResponse.json({ error: "Bitte Fach und Kategorie wählen." }, { status: 400 });
   }
 

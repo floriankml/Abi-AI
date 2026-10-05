@@ -3,7 +3,7 @@ import { ArrowRight, Clock, Sparkles } from "lucide-react";
 import { aiStatus } from "@/server/ai";
 import { counts, frequentErrors, progressOverview, studyMinutes, suggestions } from "@/server/services/progress";
 import { recentSessions } from "@/server/services/sessions";
-import { getSubject } from "@/server/services/subjects";
+import { allSubjectsById } from "@/server/services/subjects";
 import { Badge, Card, CardTitle, EmptyState, PageHeader, ProgressBar, SubjectDot, buttonClass } from "@/components/ui";
 import { formatDateTime, formatMinutes, pct } from "@/lib/format";
 import { requireAuth } from "@/server/auth";
@@ -17,13 +17,17 @@ function greeting() {
 
 export default async function DashboardPage() {
   await requireAuth();
-  const ai = aiStatus();
-  const c = counts();
-  const overview = progressOverview();
-  const todo = suggestions(3);
-  const errors = frequentErrors(30, 5);
-  const sessions = recentSessions(5);
-  const week = studyMinutes(7);
+  const [ai, c, overview, errors, sessions, week, today, subjectsById] = await Promise.all([
+    aiStatus(),
+    counts(),
+    progressOverview(),
+    frequentErrors(30, 5),
+    recentSessions(5),
+    studyMinutes(7),
+    studyMinutes(1),
+    allSubjectsById(),
+  ]);
+  const todo = suggestions(overview, 3);
   const needsSetup = !ai.configured || c.topics === 0 || c.materials === 0;
 
   return (
@@ -92,7 +96,7 @@ export default async function DashboardPage() {
           </CardTitle>
           <p className="text-3xl font-semibold tracking-tight">{formatMinutes(week)}</p>
           <p className="mt-1 text-sm text-muted">in den letzten 7 Tagen</p>
-          <p className="mt-4 text-sm text-muted">Heute: {formatMinutes(studyMinutes(1))}</p>
+          <p className="mt-4 text-sm text-muted">Heute: {formatMinutes(today)}</p>
         </Card>
 
         <Card className="md:col-span-2">
@@ -145,7 +149,7 @@ export default async function DashboardPage() {
           ) : (
             <ul className="divide-y divide-border">
               {sessions.map((s) => {
-                const subj = getSubject(s.subjectId);
+                const subj = subjectsById.get(s.subjectId);
                 return (
                   <li key={s.id}>
                     <Link

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/server/db/client";
+import { queryOne } from "@/server/db/client";
 
 /** Für Docker-Healthcheck und Monitoring. Gibt keine Daten preis. */
 export async function GET() {
   try {
-    getDb().$client.prepare("SELECT 1").get();
+    await queryOne("SELECT 1");
     return NextResponse.json({ status: "ok" });
-  } catch {
+  } catch (err) {
+    console.error("[health]", err instanceof Error ? err.message : err);
     return NextResponse.json({ status: "error" }, { status: 503 });
   }
 }

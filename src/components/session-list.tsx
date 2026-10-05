@@ -1,16 +1,17 @@
 import Link from "next/link";
 import type { Session } from "@/server/db/schema";
-import { getSubject, topicPath } from "@/server/services/subjects";
+import { allSubjectsById, listAllTopics, topicPathFrom } from "@/server/services/subjects";
 import { formatDateTime } from "@/lib/format";
 import { Badge, SubjectDot } from "./ui";
 
-export function SessionList({ sessions, base }: { sessions: Session[]; base: "/lernen" | "/ueben" }) {
+export async function SessionList({ sessions, base }: { sessions: Session[]; base: "/lernen" | "/ueben" }) {
   if (sessions.length === 0) return <p className="text-sm text-muted">Noch keine Sitzungen.</p>;
+  const [subjects, topics] = await Promise.all([allSubjectsById(), listAllTopics()]);
   return (
     <ul className="divide-y divide-border">
       {sessions.map((s) => {
-        const subject = getSubject(s.subjectId);
-        const path = topicPath(s.topicId);
+        const subject = subjects.get(s.subjectId);
+        const path = topicPathFrom(topics, s.topicId);
         return (
           <li key={s.id}>
             <Link href={`${base}/${s.id}`} className="flex items-center gap-3 py-2.5 text-sm hover:text-accent">

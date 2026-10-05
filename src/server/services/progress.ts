@@ -1,6 +1,6 @@
-import { getDb } from "../db/client";
+import { queryAll } from "../db/client";
 import { computeMastery, type Mastery } from "../domain/mastery";
-import { listSubjects, listTopics, topicSubtreeIds } from "./subjects";
+import { listAllTopics, listSubjects, subtreeIdsFrom, topicSubtreeIds } from "./subjects";
 
 /** Hinweise mindern das Ergebnis etwas – geholfen ist nicht ganz selbst gewusst. */
 const HINT_PENALTY = 0.15;
@@ -11,50 +11,54 @@ type Result = { subjectId: string; topicId: string | null; ratio: number; at: Da
  * Endergebnis je bearbeiteter Aufgabe (letzter Versuch zählt). So zählen
  * mehrere Fehlversuche einer Aufgabe nicht mehrfach.
  */
-function finalResults(): Result[] {
-  const rows = getDb()
-    .$client.prepare(
-      `SELECT t.subject_id, t.topic_id, a.score, a.max_score, a.hints_used, a.created_at
-       FROM attempts a
-       JOIN tasks t ON t.id = a.task_id
-       WHERE a.id IN (
-         SELECT id FROM (
-           SELECT id, ROW_NUMBER() OVER (PARTITION BY COALESCE(session_task_id, id) ORDER BY created_at DESC) AS rn
-           FROM attempts
-         ) WHERE rn = 1
-       )`,
-    )
-    .all() as {
+async function finalResults(subjectId?: string): Promise<Result[]> {
+  const rows = await queryAll<{
     subject_id: string;
     topic_id: string | null;
     score: number;
     max_score: number;
     hints_used: number;
     created_at: string;
-  }[];
+  }>(
+    `SELECT t.subject_id, t.topic_id, a.score, a.max_score, a.hints_used, a.created_at
+     FROM attempts a
+     JOIN tasks t ON t.id = a.task_id
+     WHERE a.id IN (
+       SELECT id FROM (
+         SELECT id, ROW_NUMBER() OVER (PARTITION BY COALESCE(session_task_id, id) ORDER BY created_at DESC) AS rn
+         FROM attempts
+       ) WHERE rn = 1
+     ) ${subjectId ? "AND t.subject_id = ?" : ""}`,
+    subjectId ? [subjectId] : [],
+  );
   return rows.map((r) => ({
     subjectId: r.subject_id,
     topicId: r.topic_id,
-    ratio: (r.max_score > 0 ? r.score / r.max_score : 0) * Math.max(0.4, 1 - HINT_PENALTY * r.hints_used),
+    ratio:
+      (r.max_score > 0 ? r.score / r.max_score : 0) *
+      Math.max(0.4, 1 - HINT_PENALTY * r.hints_used),
     at: new Date(r.created_at),
   }));
 }
 
-export function topicMastery(subjectId: string, topicId: string | null): Mastery | null {
-  const ids = topicId ? new Set(topicSubtreeIds(subjectId, topicId)) : null;
-  const relevant = finalResults().filter(
-    (r) => r.subjectId === subjectId && (!ids || (r.topicId !== null && ids.has(r.topicId))),
+export async function topicMastery(subjectId: string, topicId: string | null): Promise<Mastery | null> {
+  const ids = topicId ? new Set(await topicSubtreeIds(subjectId, topicId)) : null;
+  const relevant = (await finalResults(subjectId)).filter(
+    (r) => !ids || (r.topicId !== null && ids.has(r.topicId)),
   );
   return computeMastery(relevant, new Date());
 }
 
-export function progressOverview() {
+export type ProgressOverview = Awaited<ReturnType<typeof progressOverview>>;
+
+export async function progressOverview() {
   const now = new Date();
-  const results = finalResults();
-  return listSubjects().map((subject) => {
+  const [results, subjects, allTopics] = await Promise.all([finalResults(), listSubjects(), listAllTopics()]);
+  return subjects.map((subject) => {
     const own = results.filter((r) => r.subjectId === subject.id);
-    const topics = listTopics(subject.id).map((t) => {
-      const ids = new Set(topicSubtreeIds(subject.id, t.id));
+    const subjectTopics = allTopics.filter((t) => t.subjectId === subject.id);
+    const topics = subjectTopics.map((t) => {
+      const ids = new Set(subtreeIdsFrom(subjectTopics, t.id));
       return {
         topic: t,
         mastery: computeMastery(
@@ -67,19 +71,20 @@ export function progressOverview() {
   });
 }
 
-export function studyMinutes(days: number): number {
+export async function studyMinutes(days: number): Promise<number> {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const row = getDb()
-    .$client.prepare("SELECT COALESCE(SUM(duration_s), 0) AS s FROM attempts WHERE created_at >= ?")
-    .get(since) as { s: number };
-  return Math.round(row.s / 60);
+  const rows = await queryAll<{ s: number | null }>(
+    "SELECT COALESCE(SUM(duration_s), 0) AS s FROM attempts WHERE created_at >= ?",
+    [since],
+  );
+  return Math.round(Number(rows[0]?.s ?? 0) / 60);
 }
 
 /**
  * Einfache Vorschläge fürs Dashboard (Vorstufe der Tagesplanung aus Phase 3):
  * schwach beherrschte oder noch nie geübte, prüfungsrelevante Themen.
  */
-export function suggestions(limit = 3) {
+export function suggestions(overview: ProgressOverview, limit = 3) {
   const out: {
     subjectId: string;
     subjectName: string;
@@ -90,7 +95,7 @@ export function suggestions(limit = 3) {
     priority: number;
   }[] = [];
   const now = Date.now();
-  for (const { subject, topics } of progressOverview()) {
+  for (const { subject, topics } of overview) {
     for (const { topic, mastery } of topics) {
       const weight = 1 + topic.examWeight;
       let priority: number;
@@ -123,29 +128,27 @@ export function suggestions(limit = 3) {
 }
 
 /** Häufigste Fehlerbilder der letzten Tage (Vorstufe der Fehlerdatenbank). */
-export function frequentErrors(days = 30, limit = 5) {
+export async function frequentErrors(days = 30, limit = 5) {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  return getDb()
-    .$client.prepare(
-      `SELECT json_extract(e.value, '$.label') AS label, s.name AS subject, s.color AS color,
-              COUNT(*) AS n, MAX(a.created_at) AS last_at
-       FROM attempts a, json_each(a.evaluation, '$.errors') e
-       JOIN tasks t ON t.id = a.task_id
-       JOIN subjects s ON s.id = t.subject_id
-       WHERE a.created_at >= ?
-       GROUP BY lower(label), s.id
-       ORDER BY n DESC, last_at DESC
-       LIMIT ?`,
-    )
-    .all(since, limit) as { label: string; subject: string; color: string; n: number; last_at: string }[];
+  return queryAll<{ label: string; subject: string; color: string; n: number; last_at: string }>(
+    `SELECT json_extract(e.value, '$.label') AS label, s.name AS subject, s.color AS color,
+            COUNT(*) AS n, MAX(a.created_at) AS last_at
+     FROM attempts a, json_each(a.evaluation, '$.errors') e
+     JOIN tasks t ON t.id = a.task_id
+     JOIN subjects s ON s.id = t.subject_id
+     WHERE a.created_at >= ?
+     GROUP BY lower(label), s.id
+     ORDER BY n DESC, last_at DESC
+     LIMIT ?`,
+    [since, limit],
+  );
 }
 
-export function counts() {
-  const db = getDb().$client;
-  const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
-  return {
-    topics: one("SELECT COUNT(*) AS n FROM topics"),
-    materials: one("SELECT COUNT(*) AS n FROM materials"),
-    attempts: one("SELECT COUNT(*) AS n FROM attempts"),
-  };
+export async function counts() {
+  const rows = await queryAll<{ topics: number; materials: number; attempts: number }>(
+    `SELECT (SELECT COUNT(*) FROM topics) AS topics,
+            (SELECT COUNT(*) FROM materials) AS materials,
+            (SELECT COUNT(*) FROM attempts) AS attempts`,
+  );
+  return rows[0];
 }

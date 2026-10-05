@@ -8,13 +8,13 @@ export const metadata = { title: "Fortschritt" };
 
 export default async function ProgressPage() {
   await requireAuth();
-  const overview = progressOverview();
+  const [overview, week, month] = await Promise.all([progressOverview(), studyMinutes(7), studyMinutes(30)]);
   const anything = overview.some((o) => o.tasksDone > 0);
   return (
     <>
       <PageHeader
         title="Fortschritt"
-        description={`Lernzeit: ${formatMinutes(studyMinutes(7))} in 7 Tagen · ${formatMinutes(studyMinutes(30))} in 30 Tagen`}
+        description={`Lernzeit: ${formatMinutes(week)} in 7 Tagen · ${formatMinutes(month)} in 30 Tagen`}
       />
       {!anything && (
         <div className="mb-4">

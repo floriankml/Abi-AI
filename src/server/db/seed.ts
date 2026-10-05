@@ -28,10 +28,11 @@ export function slugify(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
-export function seedIfEmpty(db: Db) {
-  const existing = db.select({ id: subjects.id }).from(subjects).limit(1).all();
+export async function seedIfEmpty(db: Db) {
+  const existing = await db.select({ id: subjects.id }).from(subjects).limit(1);
   if (existing.length > 0) return;
-  db.insert(subjects)
+  await db
+    .insert(subjects)
     .values(DEFAULT_SUBJECTS.map((s, i) => ({ ...s, slug: slugify(s.name), position: i })))
-    .run();
+    .onConflictDoNothing();
 }

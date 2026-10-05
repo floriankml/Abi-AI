@@ -83,13 +83,13 @@ export async function runAi<S extends z.ZodType>(req: {
       console.error(`[ai] ${req.task} fehlgeschlagen:`, err instanceof AiError ? `${err.code} – ${err.message.slice(0, 300)}` : err);
       if (!(err instanceof AiError && err.code === "invalid_output")) throw err;
     } finally {
-      logUsage(req.task, provider.name, model, usage, ok);
+      await logUsage(req.task, provider.name, model, usage, ok);
     }
   }
   throw new AiError("invalid_output", "Ausgabe nach Wiederholung ungültig");
 }
 
-function logUsage(
+async function logUsage(
   task: string,
   provider: string,
   model: string,
@@ -97,10 +97,10 @@ function logUsage(
   ok: boolean,
 ) {
   try {
-    getDb()
+    const db = await getDb();
+    await db
       .insert(aiUsage)
-      .values({ task, provider, model, inputTokens: usage.input, outputTokens: usage.output, ok })
-      .run();
+      .values({ task, provider, model, inputTokens: usage.input, outputTokens: usage.output, ok });
   } catch {
     // Protokollierung darf nie eine Lernaktion scheitern lassen.
   }

@@ -11,6 +11,7 @@ export const metadata = { title: "Lernen" };
 export default async function LearnPage({ searchParams }: PageProps<"/lernen">) {
   await requireAuth();
   const sp = await searchParams;
+  const [options, sessions] = await Promise.all([subjectOptions(), listSessions("learn", 8)]);
   return (
     <>
       <PageHeader
@@ -22,14 +23,14 @@ export default async function LearnPage({ searchParams }: PageProps<"/lernen">) 
         <Card className="lg:col-span-3">
           <CardTitle>Neue Lerneinheit</CardTitle>
           <LearnStartForm
-            subjects={subjectOptions()}
+            subjects={options}
             subjectId={typeof sp.subject === "string" ? sp.subject : undefined}
             topicId={typeof sp.topic === "string" ? sp.topic : undefined}
           />
         </Card>
         <Card className="lg:col-span-2">
           <CardTitle>Letzte Lerneinheiten</CardTitle>
-          <SessionList sessions={listSessions("learn", 8)} base="/lernen" />
+          <SessionList sessions={sessions} base="/lernen" />
         </Card>
       </div>
     </>

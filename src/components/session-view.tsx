@@ -8,8 +8,8 @@ import { EndSessionButton, NextQuestionButton, SessionTimer } from "./session-co
 import { Badge, Card, PageHeader, SubjectDot, buttonClass } from "./ui";
 
 /** Gemeinsame Ansicht für Lern- und Übungssitzungen. */
-export function SessionView({ sessionId, mode }: { sessionId: string; mode: "learn" | "practice" }) {
-  const view = getSessionView(sessionId);
+export async function SessionView({ sessionId, mode }: { sessionId: string; mode: "learn" | "practice" }) {
+  const view = await getSessionView(sessionId);
   if (!view || view.session.mode !== mode) notFound();
   const { session, subject, topicPath, items, current } = view;
   const ended = !!session.endedAt;

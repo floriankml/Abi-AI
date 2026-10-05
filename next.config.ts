@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: projectRoot,
   turbopack: { root: projectRoot },
   // Native/Node-only Pakete nicht bündeln.
-  serverExternalPackages: ["better-sqlite3", "unpdf", "mammoth"],
+  serverExternalPackages: ["@libsql/client", "libsql", "unpdf", "mammoth"],
 };
 
 export default nextConfig;

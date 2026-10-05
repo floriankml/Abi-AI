@@ -87,7 +87,7 @@ const subjectInput = z.object({
 export async function createSubjectAction(_: ActionState, formData: FormData): Promise<ActionState> {
   await requireAuth();
   try {
-    createSubject(subjectInput.parse(Object.fromEntries(formData)));
+    await createSubject(subjectInput.parse(Object.fromEntries(formData)));
   } catch (err) {
     return { error: toMessage(err) };
   }
@@ -99,7 +99,7 @@ export async function updateSubjectAction(_: ActionState, formData: FormData): P
   await requireAuth();
   try {
     const id = z.string().parse(formData.get("id"));
-    updateSubject(id, subjectInput.parse(Object.fromEntries(formData)));
+    await updateSubject(id, subjectInput.parse(Object.fromEntries(formData)));
   } catch (err) {
     return { error: toMessage(err) };
   }
@@ -109,7 +109,7 @@ export async function updateSubjectAction(_: ActionState, formData: FormData): P
 
 export async function archiveSubjectAction(formData: FormData) {
   await requireAuth();
-  archiveSubject(z.string().parse(formData.get("id")));
+  await archiveSubject(z.string().parse(formData.get("id")));
   revalidatePath("/", "layout");
   redirect("/faecher");
 }
@@ -125,7 +125,7 @@ export async function createTopicAction(_: ActionState, formData: FormData): Pro
         examWeight: z.coerce.number().int().min(0).max(3),
       })
       .parse(Object.fromEntries(formData));
-    createTopic(input);
+    await createTopic(input);
   } catch (err) {
     return { error: toMessage(err) };
   }
@@ -143,7 +143,7 @@ export async function updateTopicAction(_: ActionState, formData: FormData): Pro
         examWeight: z.coerce.number().int().min(0).max(3),
       })
       .parse(Object.fromEntries(formData));
-    updateTopic(input.id, input);
+    await updateTopic(input.id, input);
   } catch (err) {
     return { error: toMessage(err) };
   }
@@ -153,7 +153,7 @@ export async function updateTopicAction(_: ActionState, formData: FormData): Pro
 
 export async function deleteTopicAction(formData: FormData) {
   await requireAuth();
-  deleteTopic(z.string().parse(formData.get("id")));
+  await deleteTopic(z.string().parse(formData.get("id")));
   revalidatePath("/faecher");
 }
 
@@ -181,7 +181,7 @@ export async function addNoteAction(_: ActionState, formData: FormData): Promise
 
 export async function deleteMaterialAction(formData: FormData) {
   await requireAuth();
-  deleteMaterial(z.string().parse(formData.get("id")));
+  await deleteMaterial(z.string().parse(formData.get("id")));
   revalidatePath("/materialien");
 }
 
@@ -273,6 +273,6 @@ export async function nextLearnTaskAction(sessionId: string): Promise<ActionStat
 
 export async function endSessionAction(sessionId: string, mode: "learn" | "practice") {
   await requireAuth();
-  endSession(sessionId);
+  await endSession(sessionId);
   revalidatePath(sessionPath(mode, sessionId));
 }

@@ -1,4 +1,4 @@
-import { getDb } from "../db/client";
+import { queryAll } from "../db/client";
 import type { Snippet } from "../ai/prompts";
 import type { SourceRef } from "../db/schema";
 
@@ -39,40 +39,37 @@ export function buildFtsQuery(text: string): string | null {
  * Unterthemen), ergänzt durch fachweite Treffer. Alte Abituraufgaben werden
  * gesondert berücksichtigt, damit sie als Stilvorbild dienen.
  */
-export function findSnippets(opts: {
+export async function findSnippets(opts: {
   subjectId: string;
   topicIds: string[] | null;
   query: string;
   limit?: number;
-}): RetrievedSnippet[] {
+}): Promise<RetrievedSnippet[]> {
   const limit = opts.limit ?? 6;
   const fts = buildFtsQuery(opts.query);
-  const db = getDb().$client;
 
   let rows: (Row & { rank: number })[] = [];
   if (fts) {
-    rows = db
-      .prepare(
+    rows = await queryAll<Row & { rank: number }>(
         `SELECT f.chunk_id, f.material_id, c.text, c.page, m.title, m.category, m.topic_id, bm25(material_chunks_fts) AS rank
          FROM material_chunks_fts f
          JOIN material_chunks c ON c.id = f.chunk_id
          JOIN materials m ON m.id = f.material_id
          WHERE material_chunks_fts MATCH ? AND f.subject_id = ?
          ORDER BY rank LIMIT 40`,
-      )
-      .all(fts, opts.subjectId) as (Row & { rank: number })[];
+        [fts, opts.subjectId],
+      );
   }
 
   // Material, das direkt dem Thema zugeordnet ist, auch ohne Worttreffer einbeziehen.
   if (opts.topicIds?.length) {
     const placeholders = opts.topicIds.map(() => "?").join(",");
-    const direct = db
-      .prepare(
+    const direct = await queryAll<Row & { rank: number }>(
         `SELECT c.id AS chunk_id, c.material_id, c.text, c.page, m.title, m.category, m.topic_id, 0 AS rank
          FROM material_chunks c JOIN materials m ON m.id = c.material_id
          WHERE m.topic_id IN (${placeholders}) ORDER BY c.position LIMIT 20`,
-      )
-      .all(...opts.topicIds) as (Row & { rank: number })[];
+        opts.topicIds,
+      );
     const seen = new Set(rows.map((r) => r.chunk_id));
     rows.push(...direct.filter((r) => !seen.has(r.chunk_id)));
   }

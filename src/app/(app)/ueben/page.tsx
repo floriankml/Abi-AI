@@ -11,6 +11,7 @@ export const metadata = { title: "Üben" };
 export default async function PracticePage({ searchParams }: PageProps<"/ueben">) {
   await requireAuth();
   const sp = await searchParams;
+  const [options, sessions] = await Promise.all([subjectOptions(), listSessions("practice", 8)]);
   return (
     <>
       <PageHeader
@@ -22,14 +23,14 @@ export default async function PracticePage({ searchParams }: PageProps<"/ueben">
         <Card className="lg:col-span-3">
           <CardTitle>Aufgaben erstellen</CardTitle>
           <PracticeStartForm
-            subjects={subjectOptions()}
+            subjects={options}
             subjectId={typeof sp.subject === "string" ? sp.subject : undefined}
             topicId={typeof sp.topic === "string" ? sp.topic : undefined}
           />
         </Card>
         <Card className="lg:col-span-2">
           <CardTitle>Letzte Übungen</CardTitle>
-          <SessionList sessions={listSessions("practice", 8)} base="/ueben" />
+          <SessionList sessions={sessions} base="/ueben" />
         </Card>
       </div>
     </>

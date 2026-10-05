@@ -1,7 +1,6 @@
-import fs from "node:fs";
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/server/auth";
-import { getMaterial, materialFilePath } from "@/server/services/materials";
+import { getMaterial, readMaterialFile } from "@/server/services/materials";
 import type { Material } from "@/server/db/schema";
 
 const SAFE_IMAGE = /^image\/(png|jpeg|webp|gif)$/;
@@ -29,11 +28,10 @@ function safeType(m: Material): { type: string; inline: boolean } {
 export async function GET(_: Request, ctx: RouteContext<"/api/materials/[id]/file">) {
   if (!(await isAuthenticated())) return new NextResponse("Nicht angemeldet", { status: 401 });
   const { id } = await ctx.params;
-  const m = getMaterial(id);
+  const m = await getMaterial(id);
   if (!m) return new NextResponse("Nicht gefunden", { status: 404 });
-  const file = materialFilePath(m.filePath);
-  if (!fs.existsSync(file)) return new NextResponse("Datei fehlt", { status: 404 });
-  const data = fs.readFileSync(file);
+  const data = await readMaterialFile(m.filePath);
+  if (!data) return new NextResponse("Datei fehlt", { status: 404 });
   const { type, inline } = safeType(m);
   return new NextResponse(new Uint8Array(data), {
     headers: {

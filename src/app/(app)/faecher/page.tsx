@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { createSubjectAction } from "@/app/actions";
-import { listSubjects, listTopics } from "@/server/services/subjects";
+import { listAllTopics, listSubjects } from "@/server/services/subjects";
 import { listMaterials } from "@/server/services/materials";
 import { ActionForm } from "@/components/action-form";
 import { SubjectFields } from "@/components/subject-fields";
@@ -12,7 +12,7 @@ export const metadata = { title: "Fächer & Themen" };
 
 export default async function SubjectsPage() {
   await requireAuth();
-  const subjects = listSubjects();
+  const [subjects, topics, materials] = await Promise.all([listSubjects(), listAllTopics(), listMaterials()]);
   return (
     <>
       <PageHeader
@@ -22,8 +22,8 @@ export default async function SubjectsPage() {
       <Card className="mb-6 p-0">
         <ul className="divide-y divide-border">
           {subjects.map((s) => {
-            const topicCount = listTopics(s.id).length;
-            const materialCount = listMaterials({ subjectId: s.id }).length;
+            const topicCount = topics.filter((t) => t.subjectId === s.id).length;
+            const materialCount = materials.filter((m) => m.subjectId === s.id).length;
             return (
               <li key={s.id}>
                 <Link href={`/faecher/${s.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-surface-2">

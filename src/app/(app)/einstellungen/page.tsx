@@ -11,7 +11,7 @@ export const metadata = { title: "Einstellungen" };
 export default async function SettingsPage() {
   await requireAuth();
   const ai = aiStatus();
-  const usage = aiUsageSummary(30);
+  const usage = await aiUsageSummary(30);
   return (
     <>
       <PageHeader title="Einstellungen" />

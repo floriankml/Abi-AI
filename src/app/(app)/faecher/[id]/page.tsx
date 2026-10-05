@@ -20,11 +20,14 @@ const WEIGHT_LABELS = ["kaum relevant", "normal", "wichtig", "sehr wichtig"];
 export default async function SubjectPage({ params }: PageProps<"/faecher/[id]">) {
   await requireAuth();
   const { id } = await params;
-  const subject = getSubject(id);
+  const [subject, topics, materials] = await Promise.all([
+    getSubject(id),
+    listTopics(id),
+    listMaterials({ subjectId: id }),
+  ]);
   if (!subject || subject.archivedAt) notFound();
-  const tree = buildTopicTree(listTopics(id));
+  const tree = buildTopicTree(topics);
   const flat = flattenTree(tree);
-  const materials = listMaterials({ subjectId: id });
 
   return (
     <>

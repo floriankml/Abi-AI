@@ -1,12 +1,13 @@
 import type { SubjectOption } from "@/components/subject-topic-select";
-import { buildTopicTree, flattenTree, listSubjects, listTopics } from "./subjects";
+import { buildTopicTree, flattenTree, listAllTopics, listSubjects } from "./subjects";
 
 /** Fächer mit Themenbaum für Auswahlfelder. */
-export function subjectOptions(): SubjectOption[] {
-  return listSubjects().map((s) => ({
+export async function subjectOptions(): Promise<SubjectOption[]> {
+  const [subjects, topics] = await Promise.all([listSubjects(), listAllTopics()]);
+  return subjects.map((s) => ({
     id: s.id,
     name: s.name,
-    topics: flattenTree(buildTopicTree(listTopics(s.id))).map((t) => ({
+    topics: flattenTree(buildTopicTree(topics.filter((t) => t.subjectId === s.id))).map((t) => ({
       id: t.id,
       title: t.title,
       depth: t.depth,
