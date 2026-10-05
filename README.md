@@ -12,7 +12,20 @@ Architektur: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Stand & Planung: [d
 
 ---
 
-## Schnellstart (eigener Rechner, kostenlos)
+## Einfachster Start (Doppelklick)
+
+1. **Node.js** installieren: <https://nodejs.org/de/download> → Version „LTS“.
+2. **AbiOS herunterladen** und entpacken:
+   [ZIP herunterladen](https://github.com/floriankml/abi-ai/archive/refs/heads/claude/abios-learning-platform-9h6w5w.zip)
+3. Im entpackten Ordner doppelklicken:
+   - Windows: **`AbiOS starten (Windows).bat`**
+   - Mac: **`AbiOS starten (Mac).command`** (beim ersten Mal: Rechtsklick → „Öffnen“)
+4. Beim ersten Start fragt AbiOS nach einem **Passwort** (frei wählbar) und deinem
+   **Gemini-Schlüssel** (<https://aistudio.google.com/apikey>). Danach öffnet sich der Browser.
+
+Ab dann: nur noch doppelklicken. Das Fenster offen lassen, solange du lernst.
+
+## Schnellstart für Entwickler (eigener Rechner, kostenlos)
 
 Voraussetzung: [Node.js 22+](https://nodejs.org)
 
