@@ -30,6 +30,8 @@ Zum Entwickeln: `npm run dev`.
 
 1. Auf <https://aistudio.google.com/apikey> mit einem Google-Konto einen API-Schlüssel erstellen.
 2. In `.env` die Vorlage „Option A“ aktivieren und den Schlüssel eintragen.
+   Am besten auch `AI_MODEL_FALLBACKS` setzen: Der Gratis-Tarif ist oft überlastet
+   oder am Limit, dann weicht AbiOS automatisch auf das nächste Modell aus.
 3. AbiOS neu starten. Unter **Einstellungen** steht dann „aktiv“.
 
 > Hinweis zum Datenschutz: Im kostenlosen Tarif darf Google Anfragen zur

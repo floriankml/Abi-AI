@@ -4,7 +4,7 @@ import type { SubjectProfile } from "../db/schema";
  * Prompt-Vorlagen. Version erhöhen, wenn sich das Verhalten ändert – sie wird
  * an jeder generierten Aufgabe gespeichert (Nachvollziehbarkeit).
  */
-export const PROMPT_VERSION = "v1";
+export const PROMPT_VERSION = "v2";
 
 export type SubjectContext = {
   name: string;

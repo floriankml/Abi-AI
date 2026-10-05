@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import { AiError, mapHttpError, parseJsonText, type AiProvider, type JsonRequest } from "../provider";
+import {
+  AiError,
+  mapHttpError,
+  parseJsonText,
+  type AiProvider,
+  type JsonRequest,
+} from "../provider";
 
 /**
  * Adapter für alle Anbieter mit OpenAI-kompatibler Chat-API:
@@ -11,6 +17,7 @@ export function createOpenAiCompatibleProvider(cfg: {
   apiKey: string;
   modelFast: string;
   modelStrong: string;
+  modelFallbacks?: string[];
   jsonMode: "json_object" | "json_schema";
 }): AiProvider {
   const client = new OpenAI({
@@ -24,7 +31,11 @@ export function createOpenAiCompatibleProvider(cfg: {
   return {
     name: "openai-compatible",
     async generateJson(req: JsonRequest) {
-      const model = req.tier === "strong" ? cfg.modelStrong : cfg.modelFast;
+      const primary = req.tier === "strong" ? cfg.modelStrong : cfg.modelFast;
+      const models = [
+        primary,
+        ...(cfg.modelFallbacks ?? []).filter((m) => m !== primary),
+      ];
       const jsonSchema = z.toJSONSchema(req.schema);
       const system =
         req.system +
@@ -32,21 +43,41 @@ export function createOpenAiCompatibleProvider(cfg: {
         JSON.stringify(jsonSchema);
 
       let res;
-      try {
-        res = await client.chat.completions.create({
-          model,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: req.prompt },
-          ],
-          response_format:
-            cfg.jsonMode === "json_schema"
-              ? { type: "json_schema", json_schema: { name: req.task, schema: jsonSchema } }
-              : { type: "json_object" },
-        });
-      } catch (err) {
-        if (err instanceof OpenAI.APIError) throw mapHttpError(err.status, err.message);
-        throw new AiError("unavailable", String(err));
+      let model = primary;
+      for (let i = 0; ; i++) {
+        model = models[i];
+        try {
+          res = await client.chat.completions.create({
+            model,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: req.prompt },
+            ],
+            response_format:
+              cfg.jsonMode === "json_schema"
+                ? {
+                    type: "json_schema",
+                    json_schema: { name: req.task, schema: jsonSchema },
+                  }
+                : { type: "json_object" },
+          });
+          break;
+        } catch (err) {
+          const mapped =
+            err instanceof OpenAI.APIError
+              ? mapHttpError(err.status, err.message)
+              : new AiError("unavailable", String(err));
+          // Bei Überlastung, Limit oder fehlendem Modell das nächste Modell versuchen.
+          const retryable = [
+            "unavailable",
+            "rate_limited",
+            "model_not_found",
+          ].includes(mapped.code);
+          if (!retryable || i + 1 >= models.length) throw mapped;
+          console.warn(
+            `[ai] ${model}: ${mapped.code}, weiche aus auf ${models[i + 1]}`,
+          );
+        }
       }
 
       const text = res.choices[0]?.message?.content ?? "";

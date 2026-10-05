@@ -14,7 +14,7 @@
 
 ### Funktioniert alles?
 
-Geprüft mit 25 automatischen Tests (Lernlogik, KI-Adapter gegen nachgebauten
+Geprüft mit 29 automatischen Tests (Lernlogik, KI-Adapter gegen nachgebauten
 OpenAI-kompatiblen Server, Freigaberegeln der Sitzungen) und einem
 Browser-Durchlauf gegen den Produktions-Build:
 
@@ -24,10 +24,19 @@ Browser-Durchlauf gegen den Produktions-Build:
 - Übungsmodus: mehrere Aufgaben, Timer, Abschließen nach Versuch, Zusammenfassung mit Punkten/Notenpunkten
 - Dashboard, Fortschritt, Mobilansicht, Dark Mode
 
-**Nicht geprüft (in dieser Umgebung nicht möglich):**
+**Test mit echter KI (Google Gemini, Free Tier):**
 
-- Qualität der Aufgaben/Bewertungen mit einer *echten* KI – hier gab es keinen API-Schlüssel. **Das ist der wichtigste nächste Test** (siehe unten).
-- `docker build` – kein Docker-Daemon verfügbar. Der darin verwendete Standalone-Build wurde direkt getestet.
+- Mathe (Lagebeziehungen): Aufgaben greifen Notizen *und* die alte Abituraufgabe auf; die Bewertung erkennt den typischen Denkfehler („gleich“ statt „Vielfache“, Punktprobe vergessen) und verrät die Lösung nicht. Vektoren werden als LaTeX-Matrizen korrekt dargestellt.
+- Englisch (Discussion): getrennte Bewertung von Inhalt, Struktur, Ausdruck und Sprachrichtigkeit; konkrete Grammatikfehler erkannt; realistische Punktzahl.
+- Dabei gefunden und behoben:
+  - Modellnamen veralten schnell (`gemini-2.5-flash` für neue Nutzer abgeschaltet) → klare Fehlermeldung, Vorlage auf `gemini-3.8-flash` aktualisiert.
+  - Free Tier häufig überlastet (503) oder am Limit (429) → **Ausweichmodelle** (`AI_MODEL_FALLBACKS`).
+  - LaTeX-Backslashes machten JSON ungültig oder verfälschten Formeln still (`\frac` → Steuerzeichen) → Reparatur vor dem Parsen.
+  - Interne Material-IDs („[M1]“) tauchten in Aufgaben/Hinweisen auf → Prompt verschärft + im Code entfernt.
+  - Erklärungen stellten Gegenfragen, Rückfragen kamen auch bei eindeutig falschen Antworten → Prompt und Code angepasst.
+- Offen: Hinweise werden vorab erzeugt und gehen daher nicht auf die konkrete Antwort ein. Idee für Phase 3: Hinweis 1 aus dem Feedback ableiten.
+
+**Nicht geprüft:** `docker build` – kein Docker-Daemon verfügbar. Der darin verwendete Standalone-Build wurde direkt getestet.
 
 ### Architekturprobleme?
 
@@ -44,7 +53,7 @@ Keine grundlegenden. Kleinere Punkte:
 
 ### Vor Phase 3 verbessern
 
-1. **Echte KI anschließen** (Gemini, kostenlos) und 1–2 Wochen mit echten Notizen + alten Abituraufgaben nutzen. Prompts nach den Erfahrungen nachschärfen (`src/server/ai/prompts.ts`, Version erhöhen).
+1. 1–2 Wochen mit echten Notizen + alten Abituraufgaben nutzen und Prompts nach den Erfahrungen nachschärfen (`src/server/ai/tasks.ts`, `PROMPT_VERSION` erhöhen).
 2. Mehrfaches Berechnen der Fortschrittsübersicht auf dem Dashboard zusammenfassen, sobald die Tagesplanung (Phase 3) dazukommt.
 3. Gescannte PDFs/Fotos: aktuell „kein Text“ – OCR ist für Phase 4 eingeplant; bis dahin Text-PDFs oder Notizen nutzen.
 

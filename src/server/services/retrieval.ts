@@ -105,3 +105,15 @@ export function resolveRefs(refs: string[], snippets: RetrievedSnippet[]): Sourc
   }
   return out;
 }
+
+/**
+ * Entfernt interne Material-IDs wie [M1] oder [M1, M3] aus Texten, die angezeigt
+ * werden. Die Quellen stehen ohnehin als Badge an der Aufgabe.
+ */
+export function stripRefs(text: string): string {
+  const ids = String.raw`M\d+(?:\s*[,;/]\s*M\d+)*`;
+  return text
+    .replace(new RegExp(String.raw`\s*\b(?:unter Verwendung von|gemäß|laut|siehe|in|aus)\s+[([]?\s*${ids}(?:\s*[)\]])?`, "gi"), "")
+    .replace(new RegExp(String.raw`\s*[([]\s*${ids}\s*[)\]]`, "g"), "")
+    .replace(/ {2,}/g, " ");
+}

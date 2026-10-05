@@ -2,15 +2,18 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createOpenAiCompatibleProvider } from "@/server/ai/providers/openai-compatible";
-import { AiError, parseJsonText } from "@/server/ai/provider";
+import { AiError, parseJsonText, repairLatexEscapes } from "@/server/ai/provider";
 import { evaluationSchema } from "@/server/ai/schemas";
-import { buildFtsQuery, resolveRefs } from "@/server/services/retrieval";
+import { buildFtsQuery, resolveRefs, stripRefs } from "@/server/services/retrieval";
 
 // Nachgebauter OpenAI-kompatibler Server (wie Gemini/Ollama/Mistral).
 let server: http.Server;
 let baseUrl = "";
 let lastBody: Record<string, unknown> = {};
 let reply: { status: number; content: string } = { status: 200, content: "{}" };
+/** Modelle, die mit 503 antworten (simulierte Überlastung). */
+let overloaded = new Set<string>();
+const seenModels: string[] = [];
 
 beforeAll(async () => {
   server = http.createServer((req, res) => {
@@ -18,6 +21,12 @@ beforeAll(async () => {
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
       lastBody = JSON.parse(raw);
+      seenModels.push(String(lastBody.model));
+      if (overloaded.has(String(lastBody.model))) {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "high demand" } }));
+        return;
+      }
       res.writeHead(reply.status, { "content-type": "application/json" });
       res.end(
         reply.status === 200
@@ -75,6 +84,26 @@ describe("openai-compatible provider", () => {
   });
 });
 
+describe("Ausweichmodelle", () => {
+  it("weicht bei Überlastung auf das nächste Modell aus", async () => {
+    overloaded = new Set(["fast-m"]);
+    seenModels.length = 0;
+    reply = { status: 200, content: '{"ok":1}' };
+    const p = createOpenAiCompatibleProvider({
+      baseUrl,
+      apiKey: "k",
+      modelFast: "fast-m",
+      modelStrong: "strong-m",
+      modelFallbacks: ["backup-m"],
+      jsonMode: "json_object",
+    });
+    const res = await p.generateJson({ task: "t", tier: "fast", system: "", prompt: "", schema: evaluationSchema });
+    expect(res.model).toBe("backup-m");
+    expect(seenModels.at(-1)).toBe("backup-m");
+    overloaded = new Set();
+  }, 30_000);
+});
+
 describe("parseJsonText", () => {
   it("findet JSON auch mit Begleittext", () => {
     expect(parseJsonText('Hier: {"a": 1} fertig')).toEqual({ a: 1 });
@@ -93,5 +122,31 @@ describe("retrieval helpers", () => {
     const src = { materialId: "m", chunkId: "c1", title: "T", page: 2 };
     const snippets = [{ ref: "M1", title: "T", page: 2, category: "notes", text: "", source: src }];
     expect(resolveRefs(["[M1]", "m1", "M9"], snippets)).toEqual([src]);
+  });
+});
+
+describe("stripRefs", () => {
+  it("entfernt Material-IDs aus angezeigten Texten", () => {
+    expect(stripRefs("Die Aussage ist falsch [M1]. Das gilt (M2, M3) allgemein.")).toBe("Die Aussage ist falsch. Das gilt allgemein.");
+    expect(stripRefs("Begründen Sie unter Verwendung von [M1].")).toBe("Begründen Sie.");
+    expect(stripRefs("Schau in M1 nach.")).toBe("Schau nach.");
+    expect(stripRefs("Matrix M = [1 2]")).toBe("Matrix M = [1 2]");
+  });
+});
+
+describe("LaTeX in JSON-Antworten", () => {
+  it("repariert einfache Backslashes und erhält korrekte Escapes", () => {
+    // So schreiben Modelle häufig: LaTeX mit nur einem Backslash.
+    const raw = String.raw`{"a": "$\vec{u} \cdot \vec{v} = 0$", "b": "$\frac{1}{2} \neq \times$", "c": "Zeile1\nZeile2 \"zitiert\""}`;
+    expect(parseJsonText(raw)).toEqual({
+      a: String.raw`$\vec{u} \cdot \vec{v} = 0$`,
+      b: String.raw`$\frac{1}{2} \neq \times$`,
+      c: 'Zeile1\nZeile2 "zitiert"',
+    });
+  });
+  it("lässt korrekt escapte LaTeX-Texte unverändert", () => {
+    const ok = JSON.stringify({ a: String.raw`$\frac{a}{b} \vec{n} \text{cm}$`, b: "x\ty\nz" });
+    expect(repairLatexEscapes(ok)).toBe(ok);
+    expect(parseJsonText(ok)).toEqual(JSON.parse(ok));
   });
 });

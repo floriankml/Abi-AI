@@ -21,7 +21,7 @@ import { env } from "../env";
 import { DIAGNOSE_LEVELS, nextLevel, type Verdict } from "../domain/adaptive";
 import { clamp01 } from "../domain/mastery";
 import { getSubject, topicPath, topicSubtreeIds } from "./subjects";
-import { findSnippets, resolveRefs } from "./retrieval";
+import { findSnippets, resolveRefs, stripRefs } from "./retrieval";
 import { topicMastery } from "./progress";
 
 /**
@@ -75,7 +75,7 @@ async function createTasksForSession(opts: {
     .all()
     .map((r) => r.prompt);
 
-  const generated = await generateTasks({
+  const { tasks: generated, model } = await generateTasks({
     subject: subjectCtx(opts.subject),
     topicPath: path,
     purpose: opts.purpose,
@@ -89,7 +89,7 @@ async function createTasksForSession(opts: {
   });
   if (generated.length === 0) throw new SessionError("Die KI hat keine Aufgaben erzeugt.");
 
-  const generator = `ai:${env.ai.provider}/${opts.purpose === "practice" ? env.ai.modelStrong : env.ai.modelFast}@${PROMPT_VERSION}`;
+  const generator = `ai:${env.ai.provider}/${model}@${PROMPT_VERSION}`;
   db.transaction((tx) => {
     generated.forEach((g, i) => {
       const rubric = g.rubric.filter((r) => r.criterion.trim());
@@ -102,11 +102,16 @@ async function createTasksForSession(opts: {
           topicId: opts.session.topicId,
           type: g.type,
           difficulty: Math.min(5, Math.max(1, Math.round(g.difficulty))),
-          promptMd: g.prompt_md,
+          promptMd: stripRefs(g.prompt_md),
           maxPoints,
-          solutionMd: g.solution_md,
-          rubric: rubric.length ? rubric : [{ criterion: "Vollständig richtig", points: maxPoints }],
-          hints: g.hints.filter((h) => h.trim()).slice(0, MAX_HINTS),
+          solutionMd: stripRefs(g.solution_md),
+          rubric: rubric.length
+            ? rubric.map((r) => ({ ...r, criterion: stripRefs(r.criterion) }))
+            : [{ criterion: "Vollständig richtig", points: maxPoints }],
+          hints: g.hints
+            .map(stripRefs)
+            .filter((h) => h.trim())
+            .slice(0, MAX_HINTS),
           concept: g.concept || null,
           sources: resolveRefs(g.source_refs, snippets),
           basis: g.basis,
@@ -378,9 +383,10 @@ export async function submitAnswer(input: {
     confidence = clamp01(out.confidence);
     evaluation = {
       verdict: out.verdict,
-      feedbackMd: out.feedback_md,
+      feedbackMd: stripRefs(out.feedback_md),
       errors: out.errors,
-      clarifyingQuestion: out.clarifying_question,
+      // Rückfragen nur, wenn die Antwort wirklich unklar ist – sonst führen Hinweise weiter.
+      clarifyingQuestion: out.verdict === "unclear" ? out.clarifying_question : null,
       dimensions: out.dimensions.map((d) => ({ ...d, score: clamp01(d.score) })),
     };
     // Unsichere "richtig"-Urteile nicht als richtig durchwinken.
@@ -457,7 +463,7 @@ export async function revealSolution(sessionTaskId: string) {
       const conflicts = out.conflicts.length
         ? `\n\n**Achtung, Widerspruch:** ${out.conflicts.join(" ")}`
         : "";
-      explanationMd = out.explanation_md + basisNote + conflicts;
+      explanationMd = stripRefs(out.explanation_md) + basisNote + conflicts;
     } catch {
       explanationMd = null; // Lösung wird trotzdem gezeigt.
     }

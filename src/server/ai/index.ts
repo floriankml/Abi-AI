@@ -41,7 +41,8 @@ export function aiStatus() {
 }
 
 /**
- * Führt eine KI-Aufgabe aus und gibt garantiert schema-konforme Daten zurück.
+ * Führt eine KI-Aufgabe aus und gibt garantiert schema-konforme Daten zurück
+ * (plus das tatsächlich genutzte Modell, z. B. nach Ausweichen).
  * Bei ungültiger Ausgabe wird genau einmal mit Fehlerhinweis wiederholt.
  * Protokolliert nur Token-Verbrauch, keine Inhalte.
  */
@@ -51,7 +52,7 @@ export async function runAi<S extends z.ZodType>(req: {
   system: string;
   prompt: string;
   schema: S;
-}): Promise<z.infer<S>> {
+}): Promise<{ data: z.infer<S>; model: string }> {
   const provider = getProvider();
   if (!provider) throw new AiError("not_configured", "Kein KI-Anbieter konfiguriert");
 
@@ -67,13 +68,19 @@ export async function runAi<S extends z.ZodType>(req: {
       const parsed = req.schema.safeParse(res.data);
       if (parsed.success) {
         ok = true;
-        return parsed.data;
+        return { data: parsed.data, model: res.model };
       }
+      console.warn(
+        `[ai] ${req.task}: Schema verletzt (${res.model}) bei`,
+        parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.code}`),
+      );
       prompt =
         req.prompt +
         "\n\nDeine letzte Antwort entsprach nicht dem Schema. Fehler: " +
         parsed.error.message.slice(0, 800);
     } catch (err) {
+      // Nur Fehlerart protokollieren, keine Inhalte (Datenschutz).
+      console.error(`[ai] ${req.task} fehlgeschlagen:`, err instanceof AiError ? `${err.code} – ${err.message.slice(0, 300)}` : err);
       if (!(err instanceof AiError && err.code === "invalid_output")) throw err;
     } finally {
       logUsage(req.task, provider.name, model, usage, ok);

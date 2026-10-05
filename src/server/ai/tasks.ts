@@ -44,7 +44,7 @@ export async function generateTasks(input: {
   misconception: string | null;
   avoidPrompts: string[];
   snippets: Snippet[];
-}): Promise<GeneratedTask[]> {
+}): Promise<{ tasks: GeneratedTask[]; model: string }> {
   const difficulties = Array.isArray(input.difficulty)
     ? input.difficulty.map((d) => `${d} – ${DIFFICULTY_LABELS[d]}`).join("; ")
     : `${input.difficulty} – ${DIFFICULTY_LABELS[input.difficulty]}`;
@@ -63,19 +63,22 @@ export async function generateTasks(input: {
     materialsBlock(input.snippets),
     `Erstelle die Aufgaben. Leite sie wenn möglich aus den Materialien ab (alte Abituraufgaben als Vorbild für Stil, Operatoren und Niveau).
 Jede Aufgabe braucht: eine vollständige Musterlösung mit Lösungsweg, ein Bewertungsraster, genau 2 gestufte Hinweise, die die Lösung nicht verraten.
-Gib in source_refs die genutzten Material-IDs an.`,
+- Die Aufgabe muss für sich allein verständlich sein: Die Schülerin/der Schüler sieht die Materialien beim Bearbeiten NICHT.
+- Schreibe Material-IDs wie [M1] NIEMALS in Aufgabentext, Hinweise oder Lösung – nur in source_refs.
+- Hinweise sind inhaltliche Denkanstöße (z. B. der entscheidende Zwischenschritt oder ein typischer Fehler), keine Verweise auf Unterlagen.
+  Hinweis 1: Richtung vorgeben. Hinweis 2: konkreter nächster Schritt.`,
   ]
     .filter(Boolean)
     .join("\n\n");
 
-  const out = await runAi({
+  const { data, model } = await runAi({
     task: "generateTasks",
     tier: input.purpose === "practice" ? "strong" : "fast",
     system: TUTOR_SYSTEM,
     prompt,
     schema: generateTasksSchema,
   });
-  return out.tasks.slice(0, input.count);
+  return { tasks: data.tasks.slice(0, input.count), model };
 }
 
 export async function evaluateAnswer(input: {
@@ -97,19 +100,22 @@ export async function evaluateAnswer(input: {
     `Genutzte Hinweise: ${input.hintsUsed}`,
     `ANTWORT:\n${input.answer}`,
     `Bewerte die Antwort streng nach Raster. Andere richtige Lösungswege sind gleichwertig.
-- verdict: correct (volle oder fast volle Punktzahl), partial, incorrect, unclear (Antwort mehrdeutig/unvollständig formuliert – dann clarifying_question stellen).
+- verdict: correct (volle oder fast volle Punktzahl), partial, incorrect, unclear (nur wenn die Antwort mehrdeutig ist und du ohne Nachfrage nicht fair bewerten kannst).
+- clarifying_question: NUR bei verdict = unclear, sonst null.
 - feedback_md: 1–4 Sätze, konkret, was gut ist und wo der Fehler liegt – OHNE die Lösung oder das Ergebnis zu verraten.
 - errors: jedes relevante Fehlerbild mit kurzem, wiederverwendbarem label.
-- confidence: wie sicher du dir bei der Bewertung bist.`,
+- confidence: wie sicher du dir bei der Bewertung bist.
+- dimensions: nur Dimensionen, die bei dieser Aufgabe tatsächlich gefordert sind (z. B. keine „Rechnung“ bei reinen Verständnisfragen).`,
   ].join("\n\n");
 
-  return runAi({
+  const { data } = await runAi({
     task: "evaluateAnswer",
     tier: input.strong ? "strong" : "fast",
     system: TUTOR_SYSTEM,
     prompt,
     schema: evaluationSchema,
   });
+  return data;
 }
 
 export async function explainMisconception(input: {
@@ -128,17 +134,19 @@ export async function explainMisconception(input: {
     `ANTWORT DER SCHÜLERIN/DES SCHÜLERS:\n${input.answer || "(keine Antwort – 'weiß ich nicht')"}`,
     input.errors.length ? `ERKANNTE FEHLER:\n- ${input.errors.join("\n- ")}` : "",
     materialsBlock(input.snippets),
-    `Erkläre kurz und gezielt das zugrunde liegende Missverständnis – nicht die ganze Theorie.
-Knüpfe an die Antwort an. Nutze bevorzugt die Materialien und gib die Basis an.`,
+    `Die Musterlösung wird direkt unter deiner Erklärung angezeigt. Wiederhole sie nicht, sondern erkläre kurz das dahinterliegende Konzept:
+warum es so ist und woran man es beim nächsten Mal erkennt. Knüpfe an die Antwort an (bei "weiß ich nicht": an die Kernidee).
+Stelle KEINE Gegenfragen. Keine Material-IDs wie [M1] im Text. Nutze bevorzugt die Materialien und gib die Basis an.`,
   ]
     .filter(Boolean)
     .join("\n\n");
 
-  return runAi({
+  const { data } = await runAi({
     task: "explain",
     tier: "fast",
     system: TUTOR_SYSTEM,
     prompt,
     schema: explanationSchema,
   });
+  return data;
 }
