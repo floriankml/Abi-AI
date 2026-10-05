@@ -1,0 +1,34 @@
+# AbiOS mit Docker Compose.
+#   Lokal:          docker compose up -d            → http://localhost:3000
+#   Mit HTTPS:      DOMAIN in .env setzen, dann     docker compose --profile https up -d
+services:
+  abios:
+    build: .
+    image: abios:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  # Optional: automatisches HTTPS (Let's Encrypt) für den Zugriff von unterwegs.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - abios
+
+volumes:
+  caddy_data:

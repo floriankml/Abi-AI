@@ -1,10 +1,18 @@
 # AbiOS – Architektur (Phase 1)
 
-Status: Entwurf zur Abstimmung · Stand: 05.10.2026
+Status: Phase 2 umgesetzt · Stand: 05.10.2026
 
 Dieses Dokument beschreibt, **wie** AbiOS gebaut wird, bevor Code entsteht. Es ist
 bewusst so geschrieben, dass es auch in zwei Jahren noch erklärt, warum Dinge so
 sind, wie sie sind.
+
+> **Umsetzungsnotizen (Phase 2)** – Abweichungen vom ursprünglichen Entwurf:
+> - Beherrschung wird *berechnet*, nicht in einer Tabelle `TopicMastery` gespeichert (keine Synchronisationsfehler; schnell genug).
+> - Zwischen Sitzung und Aufgabe steht `session_tasks` mit dem Ablaufzustand (Hinweise, Lösung freigegeben, Erklärung).
+> - Material hat eine `category` (`notes`, `past_exam`, `curriculum`): alte Abituraufgaben dienen gezielt als Stil-/Niveauvorbild.
+> - Jede Seite und jede Server Action prüft die Anmeldung selbst (`requireAuth`), nicht nur das Layout.
+> - Zusätzlicher KI-Anbieter `mock` für Tests und zum Ausprobieren ohne Schlüssel.
+> - Standard-KI für den kostenlosen Betrieb: Google Gemini über den OpenAI-kompatiblen Adapter.
 
 ---
 
