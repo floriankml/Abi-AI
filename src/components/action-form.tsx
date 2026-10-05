@@ -13,6 +13,7 @@ export function ActionForm({
   className,
   resetOnSuccess = true,
   variant = "primary",
+  successMessage,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   submitLabel: string;
@@ -21,6 +22,7 @@ export function ActionForm({
   className?: string;
   resetOnSuccess?: boolean;
   variant?: "primary" | "secondary";
+  successMessage?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const ref = useRef<HTMLFormElement>(null);
@@ -31,6 +33,7 @@ export function ActionForm({
     <form ref={ref} action={formAction} className={className ?? "space-y-4"}>
       {children}
       {state?.error && <Alert>{state.error}</Alert>}
+      {state?.ok && successMessage && <Alert tone="success">{successMessage}</Alert>}
       <Button type="submit" disabled={pending} variant={variant}>
         {pending ? (pendingLabel ?? "Speichere…") : submitLabel}
       </Button>

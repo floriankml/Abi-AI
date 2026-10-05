@@ -6,6 +6,9 @@ import { Card, CardTitle, PageHeader } from "@/components/ui";
 import { PracticeStartForm } from "../lernen/start-form";
 import { requireAuth } from "@/server/auth";
 
+// KI-Anfragen (Server Actions dieser Seite) dürfen länger dauern.
+export const maxDuration = 120;
+
 export const metadata = { title: "Üben" };
 
 export default async function PracticePage({ searchParams }: PageProps<"/ueben">) {

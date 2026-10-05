@@ -10,6 +10,7 @@ import { Badge, Card, CardTitle, EmptyState, Field, PageHeader, SubjectDot, butt
 import { formatBytes, formatDate } from "@/lib/format";
 import { CATEGORY_LABELS } from "./categories";
 import { UploadForm } from "./upload-form";
+import { storageMode } from "@/server/storage";
 import { requireAuth } from "@/server/auth";
 
 export const metadata = { title: "Materialien" };
@@ -44,7 +45,7 @@ export default async function MaterialsPage({ searchParams }: PageProps<"/materi
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <Card>
           <CardTitle>Dateien hochladen</CardTitle>
-          <UploadForm subjects={options} defaultSubjectId={subjectFilter} />
+          <UploadForm subjects={options} defaultSubjectId={subjectFilter} directUpload={storageMode() === "blob"} />
         </Card>
         <Card>
           <CardTitle>Notiz schreiben</CardTitle>

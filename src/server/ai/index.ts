@@ -2,41 +2,85 @@ import type { z } from "zod";
 import { env } from "../env";
 import { getDb } from "../db/client";
 import { aiUsage } from "../db/schema";
+import { getSetting } from "../settings";
 import { AiError, type AiProvider, type ModelTier } from "./provider";
 import { createOpenAiCompatibleProvider } from "./providers/openai-compatible";
 import { createAnthropicProvider } from "./providers/anthropic";
 import { createMockProvider } from "./providers/mock";
 
-let cached: AiProvider | null | undefined;
+/** KI-Konfiguration – aus Umgebungsvariablen oder (im Browser eingerichtet) aus der Datenbank. */
+export type AiConfig = {
+  provider: "openai-compatible" | "anthropic" | "mock" | "none";
+  baseUrl: string;
+  apiKey: string;
+  modelFast: string;
+  modelStrong: string;
+  modelFallbacks: string[];
+  jsonMode: "json_object" | "json_schema";
+};
 
-/** Wählt den Anbieter anhand von AI_PROVIDER. Einzige Stelle, die Anbieter kennt. */
-function getProvider(): AiProvider | null {
-  if (cached !== undefined) return cached;
-  const c = env.ai;
-  switch (c.provider) {
-    case "openai-compatible":
-      cached = c.modelFast ? createOpenAiCompatibleProvider(c) : null;
-      break;
-    case "anthropic":
-      cached = c.apiKey && c.modelFast ? createAnthropicProvider(c) : null;
-      break;
-    case "mock":
-      cached = createMockProvider();
-      break;
-    default:
-      cached = null;
-  }
-  return cached;
+/** Voreinstellung für den kostenlosen Betrieb mit Google Gemini. */
+export const GEMINI_PRESET: Omit<AiConfig, "apiKey"> = {
+  provider: "openai-compatible",
+  baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+  modelFast: "gemini-3.8-flash",
+  modelStrong: "gemini-3.8-flash",
+  modelFallbacks: ["gemini-3.5-flash", "gemini-flash-lite-latest"],
+  jsonMode: "json_object",
+};
+
+export const aiConfigFromEnv = () => env.ai.provider !== "none";
+
+export async function getAiConfig(): Promise<AiConfig & { source: "env" | "app" }> {
+  if (aiConfigFromEnv()) return { ...env.ai, source: "env" };
+  const stored = await getSetting<Partial<AiConfig>>("ai.config");
+  return {
+    provider: "none",
+    baseUrl: "",
+    apiKey: "",
+    modelFast: "",
+    modelStrong: "",
+    modelFallbacks: [],
+    jsonMode: "json_object",
+    ...stored,
+    source: "app",
+  };
 }
 
-export function aiStatus() {
-  const p = getProvider();
+let cached: { key: string; provider: AiProvider | null } | undefined;
+
+/** Wählt den Anbieter anhand der Konfiguration. Einzige Stelle, die Anbieter kennt. */
+export function createProvider(c: AiConfig): AiProvider | null {
+  const cfg = { ...c, modelStrong: c.modelStrong || c.modelFast };
+  switch (cfg.provider) {
+    case "openai-compatible":
+      return cfg.modelFast ? createOpenAiCompatibleProvider(cfg) : null;
+    case "anthropic":
+      return cfg.apiKey && cfg.modelFast ? createAnthropicProvider(cfg) : null;
+    case "mock":
+      return createMockProvider();
+    default:
+      return null;
+  }
+}
+
+async function getProvider(): Promise<AiProvider | null> {
+  const config = await getAiConfig();
+  const key = JSON.stringify(config);
+  if (cached?.key !== key) cached = { key, provider: createProvider(config) };
+  return cached.provider;
+}
+
+export async function aiStatus() {
+  const [config, provider] = await Promise.all([getAiConfig(), getProvider()]);
   return {
-    configured: p !== null,
-    provider: env.ai.provider,
-    modelFast: env.ai.modelFast,
-    modelStrong: env.ai.modelStrong,
-    baseUrl: env.ai.baseUrl,
+    configured: provider !== null,
+    source: config.source,
+    provider: config.provider,
+    modelFast: config.modelFast,
+    modelStrong: config.modelStrong || config.modelFast,
+    baseUrl: config.baseUrl,
+    keyHint: config.apiKey ? `…${config.apiKey.slice(-4)}` : "",
   };
 }
 
@@ -53,7 +97,7 @@ export async function runAi<S extends z.ZodType>(req: {
   prompt: string;
   schema: S;
 }): Promise<{ data: z.infer<S>; model: string }> {
-  const provider = getProvider();
+  const provider = await getProvider();
   if (!provider) throw new AiError("not_configured", "Kein KI-Anbieter konfiguriert");
 
   let prompt = req.prompt;

@@ -8,6 +8,8 @@ export const env = {
   dataDir: path.resolve(/*turbopackIgnore: true*/ process.env.DATA_DIR ?? "./data"),
   appPassword: process.env.APP_PASSWORD ?? "",
   sessionSecret: process.env.SESSION_SECRET ?? "",
+  /** Schützt die Ersteinrichtung in der Cloud: nur wer den Code kennt, legt das Passwort fest. */
+  setupCode: process.env.SETUP_CODE ?? "",
   ai: {
     provider: (process.env.AI_PROVIDER ?? "none") as "openai-compatible" | "anthropic" | "mock" | "none",
     baseUrl: process.env.AI_BASE_URL ?? "",

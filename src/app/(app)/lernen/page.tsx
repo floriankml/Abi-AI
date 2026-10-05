@@ -6,6 +6,9 @@ import { Card, CardTitle, PageHeader } from "@/components/ui";
 import { LearnStartForm } from "./start-form";
 import { requireAuth } from "@/server/auth";
 
+// KI-Anfragen (Server Actions dieser Seite) dürfen länger dauern.
+export const maxDuration = 120;
+
 export const metadata = { title: "Lernen" };
 
 export default async function LearnPage({ searchParams }: PageProps<"/lernen">) {

@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
   // Erzeugt einen eigenständigen Server-Build für das Docker-Image.
   output: "standalone",
   outputFileTracingRoot: projectRoot,
+  // Datenbank-Migrationen werden zur Laufzeit gelesen (auch auf Vercel).
+  outputFileTracingIncludes: { "/**": ["./drizzle/**/*"] },
   turbopack: { root: projectRoot },
   // Native/Node-only Pakete nicht bündeln.
   serverExternalPackages: ["@libsql/client", "libsql", "unpdf", "mammoth"],

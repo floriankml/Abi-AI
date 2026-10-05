@@ -4,14 +4,20 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { timingSafeEqual } from "node:crypto";
 import {
   SESSION_COOKIE,
   checkPassword,
-  createSessionToken,
+  isSetUp,
   loginBlocked,
+  passwordFromEnv,
   requireAuth,
-  sessionCookieOptions,
+  setPassword,
+  startSession,
 } from "@/server/auth";
+import { GEMINI_PRESET, aiConfigFromEnv, getAiConfig, runAi, type AiConfig } from "@/server/ai";
+import { env } from "@/server/env";
+import { setSetting } from "@/server/settings";
 import { AiError, aiErrorMessage } from "@/server/ai/provider";
 import { MATERIAL_CATEGORIES, SUBJECT_PROFILES, TASK_TYPES } from "@/server/db/schema";
 import { MaterialError, addNote, deleteMaterial } from "@/server/services/materials";
@@ -40,7 +46,13 @@ import {
  * Anmeldung prüfen, dann Eingaben mit Zod validieren.
  */
 
-export type ActionState = { error?: string; ok?: boolean } | undefined;
+export type ActionState = { error?: string; ok?: boolean; message?: string } | undefined;
+
+function safeEqual(a: string, b: string) {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
 
 function toMessage(err: unknown): string {
   if (err instanceof AiError) return aiErrorMessage(err);
@@ -62,10 +74,130 @@ const optionalText = z
 // --- Anmeldung -------------------------------------------------------------
 
 export async function loginAction(_: ActionState, formData: FormData): Promise<ActionState> {
-  if (loginBlocked()) return { error: "Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen." };
-  if (!checkPassword(String(formData.get("password") ?? ""))) return { error: "Falsches Passwort." };
-  (await cookies()).set(SESSION_COOKIE, createSessionToken(), sessionCookieOptions);
+  if (await loginBlocked()) return { error: "Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen." };
+  if (!(await checkPassword(String(formData.get("password") ?? "")))) return { error: "Falsches Passwort." };
+  await startSession();
   redirect("/");
+}
+
+const newPassword = z
+  .object({
+    password: z.string().min(8, "Das Passwort braucht mindestens 8 Zeichen.").max(200),
+    confirm: z.string(),
+  })
+  .refine((d) => d.password === d.confirm, { message: "Die Passwörter stimmen nicht überein." });
+
+const geminiKey = z
+  .string()
+  .trim()
+  .max(500)
+  .optional()
+  .transform((v) => v || "");
+
+function firstIssue(err: z.ZodError) {
+  return err.issues[0]?.message ?? "Bitte die Eingaben prüfen.";
+}
+
+/**
+ * Ersteinrichtung im Browser: Passwort festlegen, optional KI-Schlüssel.
+ * Nur möglich, solange noch kein Passwort existiert. In der Cloud zusätzlich
+ * durch einen Einrichtungscode (SETUP_CODE) geschützt.
+ */
+export async function setupAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  if (await isSetUp()) redirect("/login");
+  if (env.setupCode) {
+    const code = String(formData.get("setupCode") ?? "").trim();
+    if (!safeEqual(code, env.setupCode)) {
+      await loginBlocked(); // gleiche Bremse wie beim Login
+      return { error: "Der Einrichtungscode stimmt nicht." };
+    }
+  }
+  const pw = newPassword.safeParse({ password: formData.get("password"), confirm: formData.get("confirm") });
+  if (!pw.success) return { error: firstIssue(pw.error) };
+  const key = geminiKey.parse(formData.get("geminiKey") ?? "");
+  await setPassword(pw.data.password);
+  if (key && !aiConfigFromEnv()) await setSetting("ai.config", { ...GEMINI_PRESET, apiKey: key });
+  await startSession();
+  redirect("/");
+}
+
+export async function changePasswordAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireAuth();
+  if (passwordFromEnv()) return { error: "Das Passwort ist über APP_PASSWORD festgelegt." };
+  if (!(await checkPassword(String(formData.get("current") ?? "")))) {
+    return { error: "Das aktuelle Passwort stimmt nicht." };
+  }
+  const pw = newPassword.safeParse({ password: formData.get("password"), confirm: formData.get("confirm") });
+  if (!pw.success) return { error: firstIssue(pw.error) };
+  await setPassword(pw.data.password);
+  await startSession(); // dieses Gerät bleibt angemeldet
+  return { ok: true };
+}
+
+/** KI-Anbieter im Browser einrichten (Gemini-Voreinstellung oder eigener Endpunkt). */
+export async function saveAiSettingsAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireAuth();
+  if (aiConfigFromEnv()) return { error: "Die KI ist über Umgebungsvariablen festgelegt." };
+  const input = z
+    .object({
+      preset: z.enum(["gemini", "custom", "anthropic", "none"]),
+      apiKey: geminiKey,
+      baseUrl: z.string().trim().max(300).optional().default(""),
+      modelFast: z.string().trim().max(100).optional().default(""),
+      modelStrong: z.string().trim().max(100).optional().default(""),
+      modelFallbacks: z.string().trim().max(500).optional().default(""),
+    })
+    .parse(Object.fromEntries(formData));
+  const previous = await getAiConfig();
+  // Leeres Schlüsselfeld = bisherigen Schlüssel behalten.
+  const apiKey = input.apiKey || previous.apiKey;
+  const fallbacks = input.modelFallbacks
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  let config: AiConfig;
+  switch (input.preset) {
+    case "gemini":
+      if (!apiKey) return { error: "Bitte den Gemini-Schlüssel eintragen." };
+      config = {
+        ...GEMINI_PRESET,
+        ...(input.modelFast ? { modelFast: input.modelFast } : {}),
+        ...(input.modelStrong ? { modelStrong: input.modelStrong } : {}),
+        ...(fallbacks.length ? { modelFallbacks: fallbacks } : {}),
+        apiKey,
+      };
+      break;
+    case "anthropic":
+      if (!apiKey || !input.modelFast) return { error: "Bitte Schlüssel und Modell eintragen." };
+      config = { ...input, provider: "anthropic", apiKey, modelFallbacks: [], jsonMode: "json_object" };
+      break;
+    case "custom":
+      if (!input.baseUrl || !input.modelFast) return { error: "Bitte Endpunkt und Modell eintragen." };
+      config = { ...input, provider: "openai-compatible", apiKey, modelFallbacks: fallbacks, jsonMode: "json_object" };
+      break;
+    default:
+      config = { ...previous, provider: "none" };
+  }
+  await setSetting("ai.config", config);
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** Kurzer Verbindungstest mit der gespeicherten KI-Konfiguration. */
+export async function testAiAction(): Promise<ActionState> {
+  await requireAuth();
+  try {
+    const { model } = await runAi({
+      task: "test",
+      tier: "fast",
+      system: "Antworte knapp.",
+      prompt: 'Antworte mit {"ok": true}.',
+      schema: z.object({ ok: z.boolean() }),
+    });
+    return { ok: true, message: `Verbindung klappt (Modell: ${model}).` };
+  } catch (err) {
+    return { error: toMessage(err) };
+  }
 }
 
 export async function logoutAction() {
