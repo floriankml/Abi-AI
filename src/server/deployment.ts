@@ -20,11 +20,5 @@ export function cloudSetupProblems(): { title: string; how: string }[] {
       how: "Im Vercel-Projekt: Storage → Create → Blob → Zugriff „Private“ → mit diesem Projekt verbinden.",
     });
   }
-  if (!env.setupCode && !env.appPassword) {
-    problems.push({
-      title: "Einrichtungscode fehlt",
-      how: "Im Vercel-Projekt: Settings → Environment Variables → SETUP_CODE mit deinem Code anlegen.",
-    });
-  }
   return problems;
 }

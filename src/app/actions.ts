@@ -4,11 +4,11 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { timingSafeEqual } from "node:crypto";
 import {
   SESSION_COOKIE,
   checkPassword,
-  isSetUp,
+  passwordRequired,
+  removePassword,
   loginBlocked,
   passwordFromEnv,
   requireAuth,
@@ -16,7 +16,6 @@ import {
   startSession,
 } from "@/server/auth";
 import { GEMINI_PRESET, aiConfigFromEnv, getAiConfig, runAi, type AiConfig } from "@/server/ai";
-import { env } from "@/server/env";
 import { setSetting } from "@/server/settings";
 import { AiError, aiErrorMessage } from "@/server/ai/provider";
 import { MATERIAL_CATEGORIES, SUBJECT_PROFILES, TASK_TYPES } from "@/server/db/schema";
@@ -48,11 +47,6 @@ import {
 
 export type ActionState = { error?: string; ok?: boolean; message?: string } | undefined;
 
-function safeEqual(a: string, b: string) {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 
 function toMessage(err: unknown): string {
   if (err instanceof AiError) return aiErrorMessage(err);
@@ -98,39 +92,29 @@ function firstIssue(err: z.ZodError) {
   return err.issues[0]?.message ?? "Bitte die Eingaben prüfen.";
 }
 
-/**
- * Ersteinrichtung im Browser: Passwort festlegen, optional KI-Schlüssel.
- * Nur möglich, solange noch kein Passwort existiert. In der Cloud zusätzlich
- * durch einen Einrichtungscode (SETUP_CODE) geschützt.
- */
-export async function setupAction(_: ActionState, formData: FormData): Promise<ActionState> {
-  if (await isSetUp()) redirect("/login");
-  if (env.setupCode) {
-    const code = String(formData.get("setupCode") ?? "").trim();
-    if (!safeEqual(code, env.setupCode)) {
-      await loginBlocked(); // gleiche Bremse wie beim Login
-      return { error: "Der Einrichtungscode stimmt nicht." };
-    }
-  }
-  const pw = newPassword.safeParse({ password: formData.get("password"), confirm: formData.get("confirm") });
-  if (!pw.success) return { error: firstIssue(pw.error) };
-  const key = geminiKey.parse(formData.get("geminiKey") ?? "");
-  await setPassword(pw.data.password);
-  if (key && !aiConfigFromEnv()) await setSetting("ai.config", { ...GEMINI_PRESET, apiKey: key });
-  await startSession();
-  redirect("/");
-}
-
+/** Passwort festlegen oder ändern. Ohne bisheriges Passwort ist kein "aktuelles" nötig. */
 export async function changePasswordAction(_: ActionState, formData: FormData): Promise<ActionState> {
   await requireAuth();
   if (passwordFromEnv()) return { error: "Das Passwort ist über APP_PASSWORD festgelegt." };
-  if (!(await checkPassword(String(formData.get("current") ?? "")))) {
+  if ((await passwordRequired()) && !(await checkPassword(String(formData.get("current") ?? "")))) {
     return { error: "Das aktuelle Passwort stimmt nicht." };
   }
   const pw = newPassword.safeParse({ password: formData.get("password"), confirm: formData.get("confirm") });
   if (!pw.success) return { error: firstIssue(pw.error) };
   await setPassword(pw.data.password);
   await startSession(); // dieses Gerät bleibt angemeldet
+  return { ok: true };
+}
+
+/** Passwortschutz wieder ausschalten (mit Bestätigung durch das aktuelle Passwort). */
+export async function removePasswordAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireAuth();
+  if (passwordFromEnv()) return { error: "Das Passwort ist über APP_PASSWORD festgelegt." };
+  if (!(await checkPassword(String(formData.get("current") ?? "")))) {
+    return { error: "Das aktuelle Passwort stimmt nicht." };
+  }
+  await removePassword();
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 

@@ -4,13 +4,15 @@ import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { env } from "./env";
-import { getSetting, setSetting } from "./settings";
+import { deleteSetting, getSetting, setSetting } from "./settings";
 
 /**
- * Einzelnutzer-Anmeldung mit einem Passwort und signiertem Sitzungs-Cookie.
+ * Einzelnutzer-Anmeldung – optional.
  *
- * Das Passwort kommt aus APP_PASSWORD (Vorrang) oder wird bei der Einrichtung
- * im Browser festgelegt und als scrypt-Hash in der Datenbank gespeichert.
+ * Ohne Passwort ist AbiOS offen nutzbar (Wunsch des Nutzers). Ein Passwort
+ * kommt aus APP_PASSWORD (Vorrang) oder wird in den Einstellungen festgelegt
+ * und als scrypt-Hash in der Datenbank gespeichert. Dann gilt: anmelden mit
+ * signiertem Sitzungs-Cookie.
  */
 
 export const SESSION_COOKIE = "abios_session";
@@ -20,8 +22,8 @@ const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number)
 /** Passwort per Umgebungsvariable fest vorgegeben (dann nicht in der App änderbar). */
 export const passwordFromEnv = () => env.appPassword.length > 0;
 
-/** Ist ein Passwort festgelegt? Sonst muss AbiOS zuerst eingerichtet werden. */
-export async function isSetUp(): Promise<boolean> {
+/** Ist ein Passwort festgelegt? Ohne Passwort ist keine Anmeldung nötig. */
+export async function passwordRequired(): Promise<boolean> {
   return passwordFromEnv() || !!(await getSetting<string>("auth.passwordHash"));
 }
 
@@ -55,13 +57,14 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
 export async function isAuthenticated(): Promise<boolean> {
   // Immer zur Anfragezeit ausführen – nie beim Build vorrendern (Daten sind live).
   await connection();
+  if (!(await passwordRequired())) return true;
   return verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
 }
 
 /** In jeder Seite und jeder Server Action aufrufen. */
 export async function requireAuth(): Promise<void> {
   if (await isAuthenticated()) return;
-  redirect((await isSetUp()) ? "/login" : "/einrichten");
+  redirect("/login");
 }
 
 export async function startSession(): Promise<void> {
@@ -109,6 +112,10 @@ export async function checkPassword(password: string): Promise<boolean> {
   }
   if (!ok) await setSetting("auth.loginFailures", [...(await recentFailures()), Date.now()]);
   return ok;
+}
+
+export async function removePassword(): Promise<void> {
+  await deleteSetting("auth.passwordHash");
 }
 
 export async function setPassword(password: string): Promise<void> {

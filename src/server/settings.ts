@@ -26,3 +26,8 @@ export async function setSetting(key: SettingKey, value: unknown): Promise<void>
     .values({ key, value })
     .onConflictDoUpdate({ target: settings.key, set: { value } });
 }
+
+export async function deleteSetting(key: SettingKey): Promise<void> {
+  const db = await getDb();
+  await db.delete(settings).where(eq(settings.key, key));
+}

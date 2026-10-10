@@ -1,10 +1,10 @@
 import { logoutAction } from "@/app/actions";
 import { aiStatus, getAiConfig } from "@/server/ai";
-import { passwordFromEnv, requireAuth } from "@/server/auth";
+import { passwordFromEnv, passwordRequired, requireAuth } from "@/server/auth";
 import { env } from "@/server/env";
 import { storageMode } from "@/server/storage";
 import { aiUsageSummary } from "@/server/services/usage";
-import { Badge, Button, Card, CardTitle, PageHeader } from "@/components/ui";
+import { Alert, Badge, Button, Card, CardTitle, PageHeader } from "@/components/ui";
 import { AiSettingsForm } from "./ai-form";
 import { PasswordForm } from "./password-form";
 
@@ -17,7 +17,12 @@ const GEMINI_URL = "generativelanguage.googleapis.com";
 
 export default async function SettingsPage() {
   await requireAuth();
-  const [ai, config, usage] = await Promise.all([aiStatus(), getAiConfig(), aiUsageSummary(30)]);
+  const [ai, config, usage, hasPassword] = await Promise.all([
+    aiStatus(),
+    getAiConfig(),
+    aiUsageSummary(30),
+    passwordRequired(),
+  ]);
   const preset =
     config.provider === "anthropic"
       ? "anthropic"
@@ -72,11 +77,21 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
-          <CardTitle>Passwort</CardTitle>
+          <CardTitle action={<Badge tone={hasPassword ? "success" : "warning"}>{hasPassword ? "an" : "aus"}</Badge>}>
+            Passwortschutz
+          </CardTitle>
           {passwordFromEnv() ? (
             <p className="text-sm text-muted">Das Passwort ist über APP_PASSWORD festgelegt.</p>
           ) : (
-            <PasswordForm />
+            <div className="space-y-4">
+              {!hasPassword && (
+                <Alert tone="warning">
+                  Ohne Passwort kann jeder, der die Adresse kennt, AbiOS öffnen – samt deiner Materialien und deines
+                  KI-Schlüssels. Du kannst hier jederzeit ein Passwort festlegen.
+                </Alert>
+              )}
+              <PasswordForm hasPassword={hasPassword} />
+            </div>
           )}
         </Card>
 
@@ -109,6 +124,7 @@ export default async function SettingsPage() {
           </ul>
         </Card>
 
+        {hasPassword && (
         <Card>
           <CardTitle>Abmelden</CardTitle>
           <form action={logoutAction}>
@@ -117,6 +133,7 @@ export default async function SettingsPage() {
             </Button>
           </form>
         </Card>
+        )}
       </div>
     </>
   );

@@ -34,11 +34,11 @@ say("\n=== AbiOS ===\n");
 // --- 1. Einstellungen (.env) --------------------------------------------------
 const envFile = join(root, ".env");
 if (!existsSync(envFile)) {
-  say("Erster Start – ich brauche zwei Angaben.\n");
-  let password = "";
-  while (password.length < 6) {
-    password = (await ask("Wähle ein Passwort für AbiOS (mind. 6 Zeichen): ", true)).trim();
-    if (password.length < 6) say("Bitte mindestens 6 Zeichen.");
+  say("Erster Start – zwei kurze Fragen.\n");
+  let password = "x";
+  while (password && password.length < 6) {
+    password = (await ask("Passwort für AbiOS (leer lassen = ohne Passwort): ", true)).trim();
+    if (password && password.length < 6) say("Bitte mindestens 6 Zeichen – oder leer lassen.");
   }
   say("\nGemini-API-Schlüssel (kostenlos unter https://aistudio.google.com/apikey).");
   const key = (await ask("Schlüssel einfügen und Enter drücken (leer lassen = später): ", true)).trim();
